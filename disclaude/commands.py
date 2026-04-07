@@ -11,7 +11,7 @@ import asyncio
 import discord
 from discord import app_commands
 
-from .config import TARGET_PROJECT, RATE_LIMIT_PER_MINUTE, SECURITY_PROMPT
+from .config import TARGET_PROJECT, RATE_LIMIT_PER_MINUTE, SECURITY_PROMPT, CODE_ALLOWED_TOOLS, PR_ALLOWED_TOOLS
 from .security import is_allowed_user, validate_branch_name, audit_log, RateLimiter
 from .claude_runner import run_claude, send_long
 
@@ -127,7 +127,7 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
             args=[
                 "-p", secured_instruction,
                 "--output-format", "text",
-                "--allowedTools", "Edit,Write,Read,Glob,Grep,Bash",
+                "--allowedTools", CODE_ALLOWED_TOOLS,
             ],
             prefix="**코드 수정 결과:**",
             cwd=TARGET_PROJECT,
@@ -171,7 +171,7 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
             args=[
                 "-p", full_prompt,
                 "--output-format", "text",
-                "--allowedTools", "Edit,Write,Read,Glob,Grep,Bash",
+                "--allowedTools", PR_ALLOWED_TOOLS,
             ],
             prefix="**PR 생성 결과:**",
             cwd=TARGET_PROJECT,

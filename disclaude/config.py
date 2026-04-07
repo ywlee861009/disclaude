@@ -54,11 +54,29 @@ BRANCH_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_-]{0,99}$")
 
 # Claude 응답에서 마스킹할 민감 정보 패턴
 SENSITIVE_PATTERNS = [
-    # 환경변수 / 토큰 값 패턴
-    re.compile(r"(DISCORD_TOKEN|TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY)\s*=\s*\S+", re.IGNORECASE),
-    # GitHub, Slack, OpenAI 등의 토큰 형식
-    re.compile(r"(ghp_|gho_|github_pat_|xoxb-|xoxp-|sk-)[a-zA-Z0-9_-]{20,}", re.IGNORECASE),
+    # 환경변수 / 토큰 값 패턴 (KEY=VALUE 형식)
+    re.compile(r"(DISCORD_TOKEN|TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY|DATABASE_URL|DB_PASSWORD)\s*=\s*\S+", re.IGNORECASE),
+    # GitHub 토큰
+    re.compile(r"(ghp_|gho_|github_pat_)[a-zA-Z0-9_-]{20,}"),
+    # Slack 토큰
+    re.compile(r"xox[bpas]-[a-zA-Z0-9-]{10,}"),
+    # OpenAI / Anthropic API 키
+    re.compile(r"sk-[a-zA-Z0-9]{20,}"),
+    # AWS 키
+    re.compile(r"AKIA[0-9A-Z]{16}"),
+    re.compile(r"aws_secret_access_key\s*=\s*\S+", re.IGNORECASE),
+    # Bearer 토큰
+    re.compile(r"Bearer\s+[a-zA-Z0-9._-]{20,}", re.IGNORECASE),
+    # 일반적인 시크릿 형식 (따옴표 안의 긴 영숫자 문자열이 KEY 옆에 있는 경우)
+    re.compile(r"""(?:secret|token|password|api_key|apikey)\s*[:=]\s*["'][^"']{8,}["']""", re.IGNORECASE),
 ]
+
+# /code 명령어에 허용할 도구 (Bash 제외 — 셸 명령 실행 차단)
+# 프롬프트 인젝션으로 SECURITY_PROMPT를 우회해도 파괴적 명령 실행 불가
+CODE_ALLOWED_TOOLS = "Edit,Write,Read,Glob,Grep"
+
+# /gen-pr 명령어에 허용할 도구 (git 명령 실행을 위해 Bash 포함)
+PR_ALLOWED_TOOLS = "Edit,Write,Read,Glob,Grep,Bash"
 
 # Claude에게 주입할 보안 시스템 프롬프트
 # 민감 파일 접근을 차단하고, 위험한 명령어 실행을 방지

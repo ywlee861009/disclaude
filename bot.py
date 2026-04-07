@@ -9,12 +9,23 @@ disclaude — Discord + Claude Code 연동 봇
   /continue_chat  : 이전 대화 이어서 질문
   /code           : 지정 프로젝트의 코드 수정 지시
   /gen-pr         : 브랜치 생성 → 코드 수정 → PR 자동 생성
+
+보안 기능:
+  - 허용된 단일 사용자 접근 제어
+  - 사용자별 Rate Limiting (분당 요청 수 제한)
+  - 브랜치 이름 화이트리스트 검증
+  - 민감 파일 접근 차단 (시스템 프롬프트 주입)
+  - 응답 내 민감 정보 필터링
+  - 전체 명령어 감사 로그 기록
 """
 
+import re
 import os
 import sys
+import time
 import logging
 import asyncio
+from collections import defaultdict
 
 import discord
 from discord import app_commands
@@ -29,6 +40,13 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("disclaude")
+
+# 감사 로그 전용 로거 — 누가 어떤 명령어를 실행했는지 기록
+audit_logger = logging.getLogger("disclaude.audit")
+_audit_handler = logging.FileHandler("audit.log", encoding="utf-8")
+_audit_handler.setFormatter(logging.Formatter("%(asctime)s %(message)s", "%Y-%m-%d %H:%M:%S"))
+audit_logger.addHandler(_audit_handler)
+audit_logger.setLevel(logging.INFO)
 
 # ──────────────────────────────────────────────
 # 환경변수 로드 및 검증
@@ -48,15 +66,87 @@ if _missing:
     sys.exit(1)
 
 DISCORD_TOKEN: str = os.getenv("DISCORD_TOKEN")
-ALLOWED_USER_ID: int = int(os.getenv("ALLOWED_USER_ID"))
-TARGET_PROJECT: str = os.getenv("TARGET_PROJECT_PATH")
 CLAUDE_PATH: str = os.getenv("CLAUDE_PATH", "claude")
+TARGET_PROJECT: str = os.getenv("TARGET_PROJECT_PATH")
+
+# 허용된 단일 사용자 ID
+ALLOWED_USER_ID: int = int(os.getenv("ALLOWED_USER_ID"))
+
+# 분당 최대 요청 수 (Rate Limiting)
+RATE_LIMIT_PER_MINUTE: int = int(os.getenv("RATE_LIMIT_PER_MINUTE", "10"))
 
 # Claude CLI 실행 시 최대 대기 시간 (초)
 CLAUDE_TIMEOUT = 300
 
 # 디스코드 메시지 최대 길이 (여유분 포함)
 DISCORD_MAX_LENGTH = 1900
+
+# ──────────────────────────────────────────────
+# 보안: 브랜치 이름 검증
+# ──────────────────────────────────────────────
+# 허용 패턴: 영문, 숫자, 하이픈, 슬래시, 언더스코어만 허용
+# 예: feat/login-page, fix/bug-123, refactor_auth
+BRANCH_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9/_-]{0,99}$")
+
+# ──────────────────────────────────────────────
+# 보안: 민감 파일 패턴
+# ──────────────────────────────────────────────
+# Claude 응답에서 이 패턴이 발견되면 마스킹 처리
+SENSITIVE_PATTERNS = [
+    # 환경변수 / 토큰 값 패턴 (긴 영숫자 문자열)
+    re.compile(r"(DISCORD_TOKEN|TOKEN|SECRET|PASSWORD|API_KEY|PRIVATE_KEY)\s*=\s*\S+", re.IGNORECASE),
+    # .env 파일 내용이 통째로 노출되는 경우
+    re.compile(r"(ghp_|gho_|github_pat_|xoxb-|xoxp-|sk-)[a-zA-Z0-9_-]{20,}", re.IGNORECASE),
+]
+
+# Claude에게 주입할 보안 시스템 프롬프트
+# 민감 파일 접근을 차단하고, 위험한 명령어 실행을 방지
+SECURITY_PROMPT = (
+    "중요 보안 규칙 (반드시 준수):\n"
+    "1. 다음 파일은 절대 읽거나 내용을 출력하지 마: .env, .env.*, *.pem, *.key, id_rsa*, credentials*, secrets*, token*\n"
+    "2. 환경변수 값(TOKEN, SECRET, PASSWORD, API_KEY 등)을 절대 출력하지 마\n"
+    "3. rm -rf, 파일 삭제, 디스크 포맷 등 파괴적 명령어를 실행하지 마\n"
+    "4. 프로젝트 디렉토리 바깥의 파일을 읽거나 수정하지 마\n"
+    "5. curl, wget 등으로 외부 서버에 데이터를 전송하지 마\n"
+    "---\n"
+)
+
+# ──────────────────────────────────────────────
+# Rate Limiter
+# ──────────────────────────────────────────────
+class RateLimiter:
+    """사용자별 분당 요청 수를 제한하는 Rate Limiter."""
+
+    def __init__(self, max_per_minute: int):
+        self.max_per_minute = max_per_minute
+        # 사용자 ID → 요청 타임스탬프 리스트
+        self._requests: dict[int, list[float]] = defaultdict(list)
+
+    def is_allowed(self, user_id: int) -> bool:
+        """요청이 허용되는지 확인하고, 허용되면 기록한다."""
+        now = time.time()
+        window_start = now - 60  # 최근 1분
+
+        # 만료된 요청 제거
+        self._requests[user_id] = [
+            t for t in self._requests[user_id] if t > window_start
+        ]
+
+        if len(self._requests[user_id]) >= self.max_per_minute:
+            return False
+
+        self._requests[user_id].append(now)
+        return True
+
+    def remaining(self, user_id: int) -> int:
+        """남은 요청 횟수를 반환한다."""
+        now = time.time()
+        window_start = now - 60
+        recent = [t for t in self._requests[user_id] if t > window_start]
+        return max(0, self.max_per_minute - len(recent))
+
+
+rate_limiter = RateLimiter(RATE_LIMIT_PER_MINUTE)
 
 # ──────────────────────────────────────────────
 # 디스코드 클라이언트 초기화
@@ -73,13 +163,55 @@ _commands_synced = False
 
 
 # ──────────────────────────────────────────────
-# 유틸리티 함수
+# 보안 유틸리티 함수
 # ──────────────────────────────────────────────
 def is_allowed(interaction: discord.Interaction) -> bool:
     """허용된 사용자인지 확인한다."""
     return interaction.user.id == ALLOWED_USER_ID
 
 
+def validate_branch_name(branch: str) -> str | None:
+    """
+    브랜치 이름이 안전한지 검증한다.
+
+    Returns:
+        None이면 유효, 문자열이면 에러 메시지
+    """
+    if not BRANCH_NAME_PATTERN.match(branch):
+        return (
+            "브랜치 이름이 유효하지 않습니다.\n"
+            "허용: 영문, 숫자, 하이픈(-), 슬래시(/), 언더스코어(_)\n"
+            "예시: `feat/login-page`, `fix/bug-123`"
+        )
+    # 경로 탈출 시도 차단
+    if ".." in branch:
+        return "브랜치 이름에 `..`은 사용할 수 없습니다."
+    return None
+
+
+def sanitize_output(text: str) -> str:
+    """
+    Claude 응답에서 민감한 정보를 마스킹한다.
+    토큰, 비밀번호 등이 실수로 포함된 경우 [REDACTED]로 대체.
+    """
+    sanitized = text
+    for pattern in SENSITIVE_PATTERNS:
+        sanitized = pattern.sub("[REDACTED]", sanitized)
+    return sanitized
+
+
+def audit_log(user: discord.User, command: str, detail: str = "") -> None:
+    """감사 로그에 명령어 실행 기록을 남긴다."""
+    detail_str = f" | {detail}" if detail else ""
+    audit_logger.info(
+        "user=%s(%s) command=%s%s",
+        user.name, user.id, command, detail_str,
+    )
+
+
+# ──────────────────────────────────────────────
+# 핵심 유틸리티 함수
+# ──────────────────────────────────────────────
 async def run_claude(args: list[str], cwd: str | None = None) -> str:
     """
     Claude Code CLI를 서브프로세스로 실행하고 결과를 반환한다.
@@ -89,7 +221,7 @@ async def run_claude(args: list[str], cwd: str | None = None) -> str:
         cwd:  작업 디렉토리. None이면 현재 디렉토리 사용.
 
     Returns:
-        Claude CLI의 stdout 출력 (문자열)
+        Claude CLI의 stdout 출력 (민감 정보 마스킹 적용됨)
 
     Raises:
         Exception: 타임아웃(5분 초과) 또는 비정상 종료 시
@@ -119,6 +251,9 @@ async def run_claude(args: list[str], cwd: str | None = None) -> str:
         error_msg = stderr.decode().strip() or f"exit code {proc.returncode}"
         logger.error("Claude 실행 실패: %s", error_msg)
         raise Exception(error_msg)
+
+    # 응답에서 민감 정보 마스킹
+    output = sanitize_output(output)
 
     logger.info("Claude 응답 완료 (길이: %d자)", len(output))
     return output
@@ -156,20 +291,38 @@ async def handle_claude_command(
     args: list[str],
     prefix: str,
     cwd: str | None = None,
+    command_name: str = "unknown",
+    detail: str = "",
 ) -> None:
     """
     Claude 명령어의 공통 실행 흐름을 처리한다.
-    권한 확인 → defer → 락 획득 → Claude 실행 → 응답 전송
+    권한 확인 → Rate Limit → 감사 로그 → defer → 락 획득 → Claude 실행 → 응답 전송
 
     Args:
-        interaction: 디스코드 인터랙션 객체
-        args:        Claude CLI 인자 리스트
-        prefix:      응답 메시지 접두사
-        cwd:         작업 디렉토리 (선택)
+        interaction:  디스코드 인터랙션 객체
+        args:         Claude CLI 인자 리스트
+        prefix:       응답 메시지 접두사
+        cwd:          작업 디렉토리 (선택)
+        command_name: 감사 로그에 기록할 명령어 이름
+        detail:       감사 로그에 추가할 상세 내용
     """
+    # 1단계: 권한 확인
     if not is_allowed(interaction):
+        logger.warning(
+            "권한 없는 접근 시도: user=%s(%s)",
+            interaction.user.name, interaction.user.id,
+        )
         await interaction.response.send_message("권한이 없습니다.", ephemeral=True)
         return
+
+    # 2단계: Rate Limit 확인
+    if not rate_limiter.is_allowed(interaction.user.id):
+        remaining_msg = f"요청 한도 초과 (분당 {RATE_LIMIT_PER_MINUTE}회). 잠시 후 다시 시도해주세요."
+        await interaction.response.send_message(remaining_msg, ephemeral=True)
+        return
+
+    # 3단계: 감사 로그 기록
+    audit_log(interaction.user, command_name, detail)
 
     await interaction.response.defer()
 
@@ -199,6 +352,8 @@ async def ask(interaction: discord.Interaction, prompt: str):
         interaction,
         args=["-p", prompt, "--output-format", "text"],
         prefix="**Claude 응답:**",
+        command_name="/ask",
+        detail=prompt[:100],
     )
 
 
@@ -210,6 +365,8 @@ async def continue_chat(interaction: discord.Interaction, prompt: str):
         interaction,
         args=["-p", prompt, "--continue", "--output-format", "text"],
         prefix="**Claude 응답 (이어서):**",
+        command_name="/continue_chat",
+        detail=prompt[:100],
     )
 
 
@@ -218,17 +375,22 @@ async def continue_chat(interaction: discord.Interaction, prompt: str):
 async def code(interaction: discord.Interaction, instruction: str):
     """
     TARGET_PROJECT 경로에서 Claude에게 코드 수정을 지시한다.
-    파일 읽기/쓰기/편집/검색/실행 도구가 허용된다.
+    보안 프롬프트가 자동으로 앞에 주입되어 민감 파일 접근을 차단한다.
     """
+    # 보안 프롬프트를 사용자 지시 앞에 주입
+    secured_instruction = SECURITY_PROMPT + instruction
+
     await handle_claude_command(
         interaction,
         args=[
-            "-p", instruction,
+            "-p", secured_instruction,
             "--output-format", "text",
             "--allowedTools", "Edit,Write,Read,Glob,Grep,Bash",
         ],
         prefix="**코드 수정 결과:**",
         cwd=TARGET_PROJECT,
+        command_name="/code",
+        detail=instruction[:100],
     )
 
 
@@ -237,9 +399,22 @@ async def code(interaction: discord.Interaction, instruction: str):
 async def gen_pr(interaction: discord.Interaction, branch: str, instruction: str):
     """
     자동으로 브랜치를 생성하고, 코드를 수정한 뒤, PR을 만들어준다.
-    전체 흐름: checkout → 수정 → commit → push → PR 생성
+    브랜치 이름은 화이트리스트 패턴으로 검증된다.
     """
+    # 1단계: 권한 확인 (handle_claude_command 전에 별도 검증이 필요)
+    if not is_allowed(interaction):
+        await interaction.response.send_message("권한이 없습니다.", ephemeral=True)
+        return
+
+    # 2단계: 브랜치 이름 검증 — 인젝션 공격 방지
+    error = validate_branch_name(branch)
+    if error:
+        await interaction.response.send_message(f"입력 오류:\n{error}", ephemeral=True)
+        return
+
+    # 보안 프롬프트 + 구조화된 지시
     full_prompt = (
+        f"{SECURITY_PROMPT}"
         f"다음 작업을 순서대로 수행해줘:\n"
         f"1. git checkout -b {branch}\n"
         f"2. {instruction}\n"
@@ -257,6 +432,8 @@ async def gen_pr(interaction: discord.Interaction, branch: str, instruction: str
         ],
         prefix="**PR 생성 결과:**",
         cwd=TARGET_PROJECT,
+        command_name="/gen-pr",
+        detail=f"branch={branch} | {instruction[:80]}",
     )
 
 

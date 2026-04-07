@@ -10,7 +10,7 @@ from collections import defaultdict
 
 import discord
 
-from config import (
+from .config import (
     ALLOWED_USER_ID,
     BRANCH_NAME_PATTERN,
     SENSITIVE_PATTERNS,

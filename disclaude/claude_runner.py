@@ -11,8 +11,8 @@ import asyncio
 
 import discord
 
-from config import CLAUDE_PATH, CLAUDE_TIMEOUT, DISCORD_MAX_LENGTH
-from security import sanitize_output
+from .config import CLAUDE_PATH, CLAUDE_TIMEOUT, DISCORD_MAX_LENGTH
+from .security import sanitize_output
 
 logger = logging.getLogger("disclaude")
 

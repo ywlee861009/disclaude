@@ -11,9 +11,9 @@ import asyncio
 import discord
 from discord import app_commands
 
-from config import TARGET_PROJECT, RATE_LIMIT_PER_MINUTE, SECURITY_PROMPT
-from security import is_allowed_user, validate_branch_name, audit_log, RateLimiter
-from claude_runner import run_claude, send_long
+from .config import TARGET_PROJECT, RATE_LIMIT_PER_MINUTE, SECURITY_PROMPT
+from .security import is_allowed_user, validate_branch_name, audit_log, RateLimiter
+from .claude_runner import run_claude, send_long
 
 logger = logging.getLogger("disclaude")
 

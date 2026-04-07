@@ -3,12 +3,16 @@ disclaude — Discord + Claude Code 연동 봇
 ==========================================
 엔트리포인트. 디스코드 클라이언트를 초기화하고 봇을 실행한다.
 
-모듈 구조:
-  config.py        : 환경변수, 상수 정의
-  security.py      : 접근 제어, Rate Limiting, 검증, 마스킹, 감사 로그
-  claude_runner.py : Claude Code CLI 실행 및 응답 분할 전송
-  commands.py      : 슬래시 명령어 정의
-  bot.py           : 엔트리포인트 (이 파일)
+실행 방법:
+  python3 bot.py
+
+패키지 구조:
+  disclaude/
+  ├── __init__.py      : 패키지 초기화
+  ├── config.py        : 환경변수, 상수 정의
+  ├── security.py      : 접근 제어, Rate Limiting, 검증, 마스킹, 감사 로그
+  ├── claude_runner.py : Claude Code CLI 실행 및 응답 분할 전송
+  └── commands.py      : 슬래시 명령어 정의
 """
 
 import logging
@@ -16,9 +20,9 @@ import logging
 import discord
 from discord import app_commands
 
-from config import DISCORD_TOKEN, RATE_LIMIT_PER_MINUTE
-from security import RateLimiter
-from commands import register_commands
+from disclaude.config import DISCORD_TOKEN, RATE_LIMIT_PER_MINUTE
+from disclaude.security import RateLimiter
+from disclaude.commands import register_commands
 
 # ──────────────────────────────────────────────
 # 로깅 설정

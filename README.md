@@ -36,6 +36,17 @@
 /gen-pr branch:feat/auto-login instruction:자동로그인 기능을 구현해줘
 ```
 
+## 보안 기능
+
+| 기능 | 설명 |
+|------|------|
+| **접근 제어** | `ALLOWED_USER_ID`에 등록된 사용자만 명령어 실행 가능 |
+| **Rate Limiting** | 사용자당 분당 요청 수 제한 (기본 10회, 환경변수로 조절) |
+| **입력 검증** | `/gen-pr` 브랜치 이름을 화이트리스트 패턴으로 검증하여 인젝션 차단 |
+| **민감 파일 차단** | `.env`, `*.pem`, `*.key` 등 민감 파일 접근을 시스템 프롬프트로 차단 |
+| **응답 필터링** | Claude 응답에 토큰/비밀번호/API 키가 포함되면 `[REDACTED]`로 마스킹 |
+| **감사 로그** | 모든 명령어 실행 기록을 `audit.log`에 저장 (사용자, 명령어, 내용) |
+
 ## 빠른 시작
 
 ### 1. 사전 요구사항
@@ -66,6 +77,7 @@ cp .env.example .env
 | `ALLOWED_USER_ID` | 본인 디스코드 ID | 개발자 모드 ON → 프로필 우클릭 → ID 복사 |
 | `TARGET_PROJECT_PATH` | 코드 수정 대상 프로젝트 경로 | 예: `/Users/me/my-project` |
 | `CLAUDE_PATH` | Claude CLI 경로 (기본값: `claude`) | `which claude`로 확인 |
+| `RATE_LIMIT_PER_MINUTE` | 분당 최대 요청 수 (기본값: `10`) | 선택 사항 |
 
 ### 4. 디스코드 봇 초대
 

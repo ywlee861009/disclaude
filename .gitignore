@@ -2,3 +2,4 @@ venv/
 __pycache__/
 .env
 audit.log
+.DS_Store

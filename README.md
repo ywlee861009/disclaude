@@ -2,6 +2,10 @@
 
 디스코드에서 슬래시 명령어로 Claude Code를 원격 제어하는 봇.
 
+## 스크린샷
+
+<img src="screenshot/discord.jpeg" width="400" alt="디스코드에서 Claude 봇과 대화하는 모습">
+
 ## 사용 가능한 명령어
 
 | 명령어 | 설명 | 예시 |

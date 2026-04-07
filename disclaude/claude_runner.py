@@ -14,6 +14,10 @@ import discord
 from .config import CLAUDE_PATH, CLAUDE_TIMEOUT, DISCORD_MAX_LENGTH
 from .security import sanitize_output
 
+# Claude 서브프로세스에 전달할 환경변수 화이트리스트
+# 민감 정보(DISCORD_TOKEN 등)가 Claude에 노출되지 않도록 필요한 것만 전달
+_SAFE_ENV_KEYS = {"PATH", "HOME", "USER", "LANG", "LC_ALL", "SHELL", "TERM", "TMPDIR"}
+
 logger = logging.getLogger("disclaude")
 
 
@@ -33,13 +37,16 @@ async def run_claude(args: list[str], cwd: str | None = None) -> str:
     """
     logger.info("Claude 실행: args=%s, cwd=%s", args, cwd)
 
+    # 안전한 환경변수만 선별하여 전달 (DISCORD_TOKEN 등 민감 정보 차단)
+    safe_env = {k: v for k, v in os.environ.items() if k in _SAFE_ENV_KEYS}
+    safe_env["FORCE_COLOR"] = "0"  # ANSI 색상 코드 제거 (디스코드 출력용)
+
     proc = await asyncio.create_subprocess_exec(
         CLAUDE_PATH, *args,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         cwd=cwd,
-        # FORCE_COLOR=0 → ANSI 색상 코드 제거 (디스코드 출력용)
-        env={**os.environ, "FORCE_COLOR": "0"},
+        env=safe_env,
     )
 
     try:
@@ -48,6 +55,7 @@ async def run_claude(args: list[str], cwd: str | None = None) -> str:
         )
     except asyncio.TimeoutError:
         proc.kill()
+        await proc.wait()  # 좀비 프로세스 방지
         logger.error("Claude 프로세스 타임아웃 (%d초 초과)", CLAUDE_TIMEOUT)
         raise Exception(f"타임아웃: {CLAUDE_TIMEOUT}초 초과")
 

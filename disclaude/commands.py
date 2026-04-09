@@ -199,3 +199,50 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
             command_name="/gen-pr",
             detail=f"branch={branch} | {instruction[:80]}",
         )
+
+    # ──────────────────────────────────────────
+    # /commit-pr — 현재 변경사항을 커밋하고 PR 생성
+    # ──────────────────────────────────────────
+    @tree.command(name="commit-pr", description="현재 변경사항을 브랜치에 커밋하고 PR 생성")
+    @app_commands.describe(branch="브랜치 이름", description="변경사항 설명 (커밋 메시지 및 PR 설명에 사용)")
+    async def commit_pr(interaction: discord.Interaction, branch: str, description: str):
+        """
+        /code로 수정한 변경사항을 새 브랜치에 커밋하고 PR을 생성한다.
+        코드 수정은 하지 않고, 현재 상태 그대로 커밋 → 푸시 → PR만 수행.
+        """
+        # 권한 확인
+        if not is_allowed_user(interaction):
+            await interaction.response.send_message("권한이 없습니다.", ephemeral=True)
+            return
+
+        # 브랜치 이름 검증
+        error = validate_branch_name(branch)
+        if error:
+            await interaction.response.send_message(f"입력 오류:\n{error}", ephemeral=True)
+            return
+
+        full_prompt = (
+            f"{SECURITY_PROMPT}"
+            f"다음 작업을 순서대로 수행해줘:\n"
+            f"1. git status로 현재 변경사항을 확인해\n"
+            f"2. 변경사항이 없으면 '커밋할 변경사항이 없습니다'라고 알려주고 중단해\n"
+            f"3. git checkout -b {branch}\n"
+            f"4. 변경된 파일을 모두 git add 해 (.env 등 민감 파일은 제외)\n"
+            f"5. 다음 설명을 기반으로 적절한 커밋 메시지를 작성하고 커밋해: {description}\n"
+            f"6. git push -u origin {branch}\n"
+            f"7. 다음 설명을 기반으로 PR을 생성해: {description}\n"
+            f"   gh pr create --title '적절한 제목' --body '설명'\n"
+            f"마지막에 PR URL을 출력해줘."
+        )
+        await handle_claude_command(
+            interaction,
+            args=[
+                "-p", full_prompt,
+                "--output-format", "text",
+                "--allowedTools", PR_ALLOWED_TOOLS,
+            ],
+            prefix="**PR 생성 결과:**",
+            cwd=TARGET_PROJECT,
+            command_name="/commit-pr",
+            detail=f"branch={branch} | {description[:80]}",
+        )

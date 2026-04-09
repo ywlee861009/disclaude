@@ -51,6 +51,7 @@ COMMAND_TIMEOUTS: dict[str, int] = {
     "/continue_chat": 60,
     "/code": 300,
     "/gen-pr": 600,
+    "/commit-pr": 600,
 }
 
 # Claude 실행 중 사용자에게 보낼 진행 알림 (경과 초, 메시지)

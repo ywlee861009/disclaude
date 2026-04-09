@@ -11,9 +11,9 @@ import asyncio
 import discord
 from discord import app_commands
 
-from .config import TARGET_PROJECT, RATE_LIMIT_PER_MINUTE, SECURITY_PROMPT, CODE_ALLOWED_TOOLS, PR_ALLOWED_TOOLS
+from .config import TARGET_PROJECT, RATE_LIMIT_PER_MINUTE, SECURITY_PROMPT, CODE_ALLOWED_TOOLS, PR_ALLOWED_TOOLS, COMMAND_TIMEOUTS, CLAUDE_TIMEOUT
 from .security import is_allowed_user, validate_branch_name, audit_log, RateLimiter
-from .claude_runner import run_claude, send_long
+from .claude_runner import run_claude, send_long, _send_progress
 
 logger = logging.getLogger("disclaude")
 
@@ -65,12 +65,19 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
         await interaction.response.defer()
 
         async with task_lock:
+            timeout = COMMAND_TIMEOUTS.get(command_name, CLAUDE_TIMEOUT)
+            progress_task = asyncio.create_task(_send_progress(interaction, timeout))
             try:
-                result = await run_claude(args, cwd=cwd)
+                result = await run_claude(args, cwd=cwd, command_name=command_name)
                 await send_long(interaction, result, prefix)
             except Exception as e:
                 logger.exception("명령어 처리 중 오류 발생")
-                await interaction.followup.send(f"오류 발생:\n```\n{str(e)[:1800]}\n```")
+                error_text = str(e)[:1800]
+                if "타임아웃" in str(e):
+                    error_text += f"\n\n💡 이 명령어의 타임아웃은 {timeout}초입니다. 더 짧은 요청으로 나눠 시도해보세요."
+                await interaction.followup.send(f"오류 발생:\n```\n{error_text}\n```")
+            finally:
+                progress_task.cancel()
 
     # ──────────────────────────────────────────
     # /ping — 봇 상태 확인

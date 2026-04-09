@@ -157,50 +157,6 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
         )
 
     # ──────────────────────────────────────────
-    # /gen-pr — 브랜치 생성 + 코드 수정 + PR 생성
-    # ──────────────────────────────────────────
-    @tree.command(name="gen-pr", description="브랜치 생성 → 코드 수정 → PR 자동 생성")
-    @app_commands.describe(branch="브랜치 이름", instruction="수정 지시 내용")
-    async def gen_pr(interaction: discord.Interaction, branch: str, instruction: str):
-        """
-        자동으로 브랜치를 생성하고, 코드를 수정한 뒤, PR을 만들어준다.
-        브랜치 이름은 화이트리스트 패턴으로 검증된다.
-        """
-        # 권한 확인 (브랜치 검증을 위해 handle_claude_command 전에 수행)
-        if not is_allowed_user(interaction):
-            await interaction.response.send_message("권한이 없습니다.", ephemeral=True)
-            return
-
-        # 브랜치 이름 검증 — 인젝션 공격 방지
-        error = validate_branch_name(branch)
-        if error:
-            await interaction.response.send_message(f"입력 오류:\n{error}", ephemeral=True)
-            return
-
-        full_prompt = (
-            f"{SECURITY_PROMPT}"
-            f"다음 작업을 순서대로 수행해줘:\n"
-            f"1. git checkout -b {branch}\n"
-            f"2. {instruction}\n"
-            f"3. 변경사항을 커밋해\n"
-            f"4. git push -u origin {branch}\n"
-            f"5. gh pr create --fill\n"
-            f"마지막에 PR URL을 출력해줘."
-        )
-        await handle_claude_command(
-            interaction,
-            args=[
-                "-p", full_prompt,
-                "--output-format", "text",
-                "--allowedTools", PR_ALLOWED_TOOLS,
-            ],
-            prefix="**PR 생성 결과:**",
-            cwd=TARGET_PROJECT,
-            command_name="/gen-pr",
-            detail=f"branch={branch} | {instruction[:80]}",
-        )
-
-    # ──────────────────────────────────────────
     # /commit-pr — 현재 변경사항을 커밋하고 PR 생성
     # ──────────────────────────────────────────
     @tree.command(name="commit-pr", description="현재 변경사항을 브랜치에 커밋하고 PR 생성")

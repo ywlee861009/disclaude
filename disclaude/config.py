@@ -50,7 +50,6 @@ COMMAND_TIMEOUTS: dict[str, int] = {
     "/ask": 60,
     "/continue_chat": 60,
     "/code": 300,
-    "/gen-pr": 600,
     "/commit-pr": 600,
 }
 

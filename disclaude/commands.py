@@ -75,7 +75,17 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
                 error_text = str(e)[:1800]
                 if "타임아웃" in str(e):
                     error_text += f"\n\n💡 이 명령어의 타임아웃은 {timeout}초입니다. 더 짧은 요청으로 나눠 시도해보세요."
-                await interaction.followup.send(f"오류 발생:\n```\n{error_text}\n```")
+                try:
+                    await interaction.followup.send(f"오류 발생:\n```\n{error_text}\n```")
+                except discord.HTTPException:
+                    # Gateway 재연결 등으로 interaction이 만료된 경우
+                    logger.warning("interaction 만료로 에러 응답 전송 실패 (command=%s)", command_name)
+                    try:
+                        await interaction.channel.send(
+                            f"⚠️ **{interaction.user.mention}** {command_name} 처리 중 오류가 발생했습니다:\n```\n{error_text[:1500]}\n```"
+                        )
+                    except discord.HTTPException:
+                        logger.error("채널 메시지 전송도 실패 (command=%s)", command_name)
             finally:
                 progress_task.cancel()
 

@@ -100,25 +100,36 @@ async def run_claude(
 async def send_long(interaction: discord.Interaction, text: str, prefix: str = "") -> None:
     """
     긴 텍스트를 디스코드 메시지 길이 제한(2000자)에 맞춰 분할 전송한다.
+    followup 전송 실패 시 채널 직접 전송으로 폴백한다.
 
     Args:
         interaction: 디스코드 인터랙션 객체
         text:        전송할 텍스트
         prefix:      첫 번째 메시지 앞에 붙일 접두사 (예: "**Claude 응답:**")
     """
-    # 텍스트가 짧으면 한 번에 전송
-    content = f"{prefix}\n```\n{text}\n```" if prefix else f"```\n{text}\n```"
-    if len(content) <= 2000:
-        await interaction.followup.send(content)
-        return
-
-    # 긴 텍스트는 DISCORD_MAX_LENGTH 단위로 분할
+    # 텍스트를 청크로 분할
     chunks: list[str] = []
-    while text:
-        chunks.append(text[:DISCORD_MAX_LENGTH])
-        text = text[DISCORD_MAX_LENGTH:]
+    if not text:
+        chunks.append("(빈 응답)")
+    else:
+        remaining = text
+        while remaining:
+            chunks.append(remaining[:DISCORD_MAX_LENGTH])
+            remaining = remaining[DISCORD_MAX_LENGTH:]
 
-    # 첫 번째 청크에만 prefix 포함
-    await interaction.followup.send(f"{prefix}\n```\n{chunks[0]}\n```")
+    messages: list[str] = []
+    messages.append(f"{prefix}\n```\n{chunks[0]}\n```" if prefix else f"```\n{chunks[0]}\n```")
     for chunk in chunks[1:]:
-        await interaction.followup.send(f"```\n{chunk}\n```")
+        messages.append(f"```\n{chunk}\n```")
+
+    for msg in messages:
+        try:
+            await interaction.followup.send(msg)
+        except discord.HTTPException:
+            # interaction 만료 시 채널 직접 전송으로 폴백
+            logger.warning("followup 전송 실패, 채널 직접 전송으로 전환")
+            try:
+                await interaction.channel.send(msg)
+            except discord.HTTPException:
+                logger.error("채널 메시지 전송도 실패")
+                return

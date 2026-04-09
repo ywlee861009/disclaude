@@ -64,6 +64,10 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
 
         await interaction.response.defer()
 
+        if task_lock.locked():
+            await interaction.followup.send("⏳ 앞선 요청을 처리 중입니다. 완료되면 자동으로 실행됩니다...")
+            logger.info("Lock 대기 중: user=%s, command=%s", interaction.user.name, command_name)
+
         async with task_lock:
             timeout = COMMAND_TIMEOUTS.get(command_name, CLAUDE_TIMEOUT)
             progress_task = asyncio.create_task(_send_progress(interaction, timeout))

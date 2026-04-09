@@ -31,6 +31,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler("bot.log", encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger("disclaude")
 
@@ -63,6 +67,24 @@ async def on_ready():
         _commands_synced = True
         logger.info("슬래시 명령어 동기화 완료")
     logger.info("봇 로그인 완료: %s (ID: %s)", client.user, client.user.id)
+
+
+@client.event
+async def on_connect():
+    """Discord Gateway에 연결되었을 때."""
+    logger.info("Gateway 연결됨")
+
+
+@client.event
+async def on_disconnect():
+    """Discord Gateway 연결이 끊어졌을 때."""
+    logger.warning("Gateway 연결 끊김 — 자동 재연결 시도 중...")
+
+
+@client.event
+async def on_resumed():
+    """Gateway 세션이 성공적으로 재개되었을 때."""
+    logger.info("Gateway 세션 재개 완료")
 
 
 # ──────────────────────────────────────────────

@@ -6,6 +6,7 @@ Claude Code CLI를 서브프로세스로 실행하고,
 """
 
 import os
+import json
 import logging
 import asyncio
 
@@ -13,6 +14,7 @@ import discord
 
 from .config import CLAUDE_PATH, CLAUDE_TIMEOUT, COMMAND_TIMEOUTS, DISCORD_MAX_LENGTH, PROGRESS_NOTIFICATIONS
 from .security import sanitize_output
+from .usage_tracker import usage_tracker
 
 # Claude 서브프로세스에 전달할 환경변수 화이트리스트
 # 민감 정보(DISCORD_TOKEN 등)가 Claude에 노출되지 않도록 필요한 것만 전달
@@ -84,11 +86,28 @@ async def run_claude(
         logger.error("Claude 프로세스 타임아웃 (%d초 초과)", timeout)
         raise Exception(f"타임아웃: {timeout}초 초과")
 
-    output = stdout.decode().strip()
+    raw = stdout.decode().strip()
     if proc.returncode != 0:
         error_msg = stderr.decode().strip() or f"exit code {proc.returncode}"
         logger.error("Claude 실행 실패: %s", error_msg)
         raise Exception(error_msg)
+
+    # JSON 응답에서 결과 텍스트와 usage 분리
+    output = raw
+    try:
+        data = json.loads(raw)
+        output = data.get("result", raw)
+        cost = data.get("total_cost_usd", 0)
+        usage = data.get("usage", {})
+        usage_tracker.record(
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cache_read_tokens=usage.get("cache_read_input_tokens", 0),
+            cache_creation_tokens=usage.get("cache_creation_input_tokens", 0),
+            cost_usd=cost,
+        )
+    except (json.JSONDecodeError, AttributeError):
+        pass  # text 형식 응답이면 그대로 사용
 
     # 응답에서 민감 정보 마스킹
     output = sanitize_output(output)

@@ -14,6 +14,7 @@ from discord import app_commands
 from .config import TARGET_PROJECT, RATE_LIMIT_PER_MINUTE, SECURITY_PROMPT, CODE_ALLOWED_TOOLS, PR_ALLOWED_TOOLS, COMMAND_TIMEOUTS, CLAUDE_TIMEOUT
 from .security import is_allowed_user, validate_branch_name, audit_log, RateLimiter
 from .claude_runner import run_claude, send_long, _send_progress
+from .usage_tracker import usage_tracker
 
 logger = logging.getLogger("disclaude")
 
@@ -94,6 +95,50 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
                 progress_task.cancel()
 
     # ──────────────────────────────────────────
+    # /usage — 토큰 사용량 및 비용 통계
+    # ──────────────────────────────────────────
+    def _format_tokens(n: int) -> str:
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.1f}K"
+        return str(n)
+
+    def _format_usage(label: str, data: dict) -> str:
+        inp = data["input_tokens"]
+        out = data["output_tokens"]
+        cache_read = data["cache_read_tokens"]
+        cache_create = data["cache_creation_tokens"]
+        cost = data["cost_usd"]
+        reqs = data["requests"]
+        lines = [
+            f"**{label}** — {reqs}회 요청, ${cost:.4f}",
+            f"  input: {_format_tokens(inp)} / output: {_format_tokens(out)}",
+            f"  cache read: {_format_tokens(cache_read)} / cache write: {_format_tokens(cache_create)}",
+        ]
+        return "\n".join(lines)
+
+    @tree.command(name="usage", description="Claude 토큰 사용량 및 비용 확인")
+    async def usage(interaction: discord.Interaction):
+        """누적된 토큰 사용량과 비용을 보여준다."""
+        if not is_allowed_user(interaction):
+            await interaction.response.send_message("권한이 없습니다.", ephemeral=True)
+            return
+
+        today_data = usage_tracker.get_today()
+        total_data = usage_tracker.get_total()
+
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+
+        msg = "\n\n".join([
+            "📊 **Claude 사용량**",
+            _format_usage(f"오늘 ({today})", today_data),
+            _format_usage("전체 누적", total_data),
+        ])
+        await interaction.response.send_message(msg, ephemeral=True)
+
+    # ──────────────────────────────────────────
     # /ping — 봇 상태 확인
     # ──────────────────────────────────────────
     @tree.command(name="ping", description="봇 상태 확인")
@@ -110,7 +155,7 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
         """Claude에게 일반적인 질문을 던진다. 프로젝트 컨텍스트 없이 독립 실행."""
         await handle_claude_command(
             interaction,
-            args=["-p", prompt, "--output-format", "text"],
+            args=["-p", prompt, "--output-format", "json"],
             prefix="**Claude 응답:**",
             command_name="/ask",
             detail=prompt[:100],
@@ -125,7 +170,7 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
         """직전 Claude 대화의 컨텍스트를 이어받아 후속 질문을 한다."""
         await handle_claude_command(
             interaction,
-            args=["-p", prompt, "--continue", "--output-format", "text"],
+            args=["-p", prompt, "--continue", "--output-format", "json"],
             prefix="**Claude 응답 (이어서):**",
             command_name="/continue_chat",
             detail=prompt[:100],
@@ -147,7 +192,7 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
             interaction,
             args=[
                 "-p", secured_instruction,
-                "--output-format", "text",
+                "--output-format", "json",
                 "--allowedTools", CODE_ALLOWED_TOOLS,
             ],
             prefix="**코드 수정 결과:**",
@@ -194,7 +239,7 @@ def register_commands(tree: app_commands.CommandTree, rate_limiter: RateLimiter)
             interaction,
             args=[
                 "-p", full_prompt,
-                "--output-format", "text",
+                "--output-format", "json",
                 "--allowedTools", PR_ALLOWED_TOOLS,
             ],
             prefix="**PR 생성 결과:**",

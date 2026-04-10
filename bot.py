@@ -16,6 +16,7 @@ disclaude — Discord + Claude Code 연동 봇
 """
 
 import logging
+from logging.handlers import TimedRotatingFileHandler
 
 import discord
 from discord import app_commands
@@ -27,13 +28,18 @@ from disclaude.commands import register_commands
 # ──────────────────────────────────────────────
 # 로깅 설정
 # ──────────────────────────────────────────────
+_file_handler = TimedRotatingFileHandler(
+    "bot.log", when="midnight", backupCount=30, encoding="utf-8",
+)
+_file_handler.namer = lambda name: name.replace("bot.log.", "bot_").replace("-", "") + ".log"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("bot.log", encoding="utf-8"),
+        _file_handler,
     ],
 )
 logger = logging.getLogger("disclaude")
